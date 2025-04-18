@@ -33,7 +33,7 @@ class FirstPromoter
 
         $res = $client->request($method, $uri, [
             'headers' => [
-                "x-api-key" => self::getApiKey()
+                "X-API-KEY" => self::getApiKey()
             ],
             'json' => $data
         ]);
@@ -62,6 +62,10 @@ class FirstPromoter
     {
         if (static::$key) {
             return static::$key;
+        }
+
+        if ($key = getenv('FP_API_KEY')) {
+            return $key;
         }
 
         if ($key = getenv('FIRST_PROMOTER_KEY')) {
