@@ -169,25 +169,65 @@ class Promoter extends FirstPromoter
     public static function commissionsForRefId($refId)
     {
         $promoter = self::find(['ref_id' => $refId]);
-        $response = self::request('GET', 'commissions', [
-            'filters' => [
-                'promoter_id' => $promoter->id,
-            ],
-        ]);
-
         $rows = [];
-        if (is_array($response)) {
-            $rows = $response;
-        } elseif (isset($response->data) && is_array($response->data)) {
-            $rows = $response->data;
-        }
+        $seen = [];
 
-        foreach ($rows as $row) {
-            if (!isset($row->conversion_amount)) {
-                $row->conversion_amount = $row->sale_amount ?? ($row->amount ?? 0);
+        // The company list defaults to 25 rows. PayRicky keeps last month from
+        // this result, so a short page drops that month for a busy promoter.
+        for ($page = 1; $page <= 100; $page++) {
+            if ($page > 1) {
+                usleep(300000);
             }
-            if (!isset($row->promoter) && isset($row->promoter_campaign->promoter)) {
-                $row->promoter = $row->promoter_campaign->promoter;
+            $response = null;
+            for ($attempt = 1; $attempt <= 6; $attempt++) {
+                try {
+                    $response = self::request('GET', 'commissions', [
+                        'filters' => [
+                            'promoter_id' => $promoter->id,
+                        ],
+                        'per_page' => 100,
+                        'page' => $page,
+                    ]);
+                    break;
+                } catch (Exception $e) {
+                    if ((int) $e->getCode() !== 429 || $attempt === 6) {
+                        throw $e;
+                    }
+                    sleep(5 * $attempt);
+                }
+            }
+
+            $batch = [];
+            if (is_array($response)) {
+                $batch = $response;
+            } elseif (isset($response->data) && is_array($response->data)) {
+                $batch = $response->data;
+            }
+            if (!$batch) {
+                break;
+            }
+
+            $added = 0;
+            foreach ($batch as $row) {
+                $id = $row->id ?? null;
+                if ($id !== null) {
+                    if (isset($seen[$id])) {
+                        continue;
+                    }
+                    $seen[$id] = true;
+                }
+                if (!isset($row->conversion_amount)) {
+                    $row->conversion_amount = $row->sale_amount ?? ($row->amount ?? 0);
+                }
+                if (!isset($row->promoter) && isset($row->promoter_campaign->promoter)) {
+                    $row->promoter = $row->promoter_campaign->promoter;
+                }
+                $rows[] = $row;
+                $added++;
+            }
+
+            if ($added === 0 || count($batch) < 100) {
+                break;
             }
         }
 
